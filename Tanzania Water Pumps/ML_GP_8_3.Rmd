@@ -1,0 +1,726 @@
+---
+title: "ML_Group_pro"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document for the Machine Learning group project. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+
+
+library(splitstackshape)
+library(ggplot2)
+library(data.table)
+library(lattice)
+library(caret)
+library(e1071)
+library(randomForest)
+library(leaflet)
+library(dplyr)
+library(RColorBrewer)
+library(naniar)
+library(tidyverse)
+```
+
+## Loading the data
+
+```{r pressure, echo=FALSE}
+
+
+train_set      <- read.csv("/Users/rouzbehrahimi/desktop/IE-BD/Machine_Learning2/Group_pro/training.csv")
+labels_train   <- read.csv("/Users/rouzbehrahimi/desktop/IE-BD/Machine_Learning2/Group_pro/lables.csv")
+test_set       <- read.csv("/Users/rouzbehrahimi/desktop/IE-BD/Machine_Learning2/Group_pro/test.csv")
+
+
+
+```
+
+## Exploring the dataset
+
+As can be seen below this is an imbalanced dataset therefore we should take it into account from the begining specifically while deviding the dataset into 
+train and test.
+```{r pressure, echo=FALSE}
+#labels_train[,.N/nrow(labels_train),by=status_group]
+#test <- stratified(labels_train, 'status_group', 0.7, select = NULL, replace = FALSE,keep.rownames = FALSE, bothSets = FALSE)
+```
+```{r}
+nrow(train_set)   #the first 59400 rows are for the train_set
+nrow(test_set)    #the next 14850 rows are for the test_set
+```
+
+## Merging train and test set for feature engineering.
+ This is the whole dataset includding test and train sets we will do the whole feature engineering on this datasset, so we do not have to do that twice.
+```{r pressure, echo=FALSE}
+test_set$status_group <- "None"
+dataset <- merge(train_set,labels_train,by="id")
+dataset <- rbind(dataset,test_set)
+
+```
+## checking the dataset
+```{r}
+summary(dataset)
+```
+## We plot the factor variables first
+```{r}
+#factors<-select_if(dataset,is.factor)
+
+#for (i in colnames(factors)){
+#  plot(dataset[,i],dataset$status_group)
+#} 
+```
+
+## Plots
+
+### Data Set Understanding
+
+This plot provides a specific visualization of the amount of missing data, showing that there aren't missing values presented as NA. But the missing values are zero and " "
+
+```{r echo=TRUE}
+vis_miss(dataset, warn_large_data= FALSE)+ 
+  labs(title = "Missing NA Data") + theme(axis.text.y = element_text(angle = 90)) + theme(axis.text.x = element_text(angle = 90))
+
+```
+
+Our	dataset	has	severe	class	imbalance, there are 43.45% of Functional Pumps, 30.74% of non-functional pumps and 5.81% of functional but which needs to be repaired and 20% of missing values.
+
+```{r echo=TRUE}
+ggplot(dataset, aes(status_group, fill=status_group)) + geom_bar()
+
+```
+
+
+
+
+```{r echo=TRUE}
+pop_plot <- ggplot(dataset, aes(population)) + geom_histogram(bins = 5) + theme(legend.position = "top") + xlim(c(0,15000)) + ylim(c(0,1000))
+pop_plot
+ 
+```
+
+
+Apparently water resource management in Tanzania relies heavily on external donors.This plot show the year when pumps were constructed. There is an up trend until 2010 and then a down trend because funders stopped giving money for pump construction.
+
+```{r echo=TRUE}
+const_plot <- ggplot(dataset, aes(construction_year)) + geom_histogram(aes(y = ..density..)) + geom_density() + xlim(c(1950,2020)) 
+const_plot
+```
+
+This visualization represents the correlation between numerical variables. The more correlated features are region_code and district_code, because represent information about the area.
+
+```{r echo=TRUE}
+numerical <-select_if(dataset,is.numeric)
+cors <- cor(numerical)
+corr_plot <- ggcorr(cors, label_round = 2)
+corr_plot
+
+```
+
+
+This plot gives us a visual representation of how each status_group is presented regarding the quantity of water in the pumps.
+Most of the dry pumps are non functional and the ones that have enough water are mostly fuctional.
+
+```{r echo=TRUE}
+quant_plot <- ggplot(dataset, aes(quantity, fill=status_group)) + geom_bar() + theme(legend.position = "right")
+quant_plot
+```
+
+
+
+### Map View
+We want to have a geographical sense of our data, given that we have longitude and latitud. For this end, we build a map that tells us, by lga, the number of pumps that were built in the region and what is the percentage of them that functions and does not function. The size of the points represent 4 levels of number of pumps and the color represents 4 levels of % of functioning, being green the regions where more than 60% of the pumps fucntion properly
+
+```{r}
+
+dt<-as.data.table(dataset)
+
+#We have several granularity levels for geographical location. In order to be able to plot them, we chose lga, as 120 different values are handable for a map. Other levels of aggregation are either too much for being handle dinamically in a chart or too few.
+length(unique(dt$region_code))
+length(unique(dt$district_code))
+length(unique(dt$ward))
+length(unique(dt$lga))
+length(unique(dt$subvillage))
+length(unique(dt$basin))
+
+#We group by lga and obtain some interesting aggregations to be used plot.
+
+statistics<-dt[,.(nr_of_pumps=.N,lat=mean(latitude),long=mean(longitude),major_status=names(sort(table(status_group), decreasing = TRUE)[1]),functioning=table(status_group)[1]/.N, total_population=sum(population)),by=lga]
+statistics
+
+#We plot the different number of pumps (size) and % of them functioning (color) by lga in a map to see if there is greograpphical relation among them. We use the mean of latitude and longitude of the values per lga to locate them.
+
+map <- leaflet();
+map <- addTiles(map);
+
+for (i in 1:nrow(statistics)){
+  map <- addCircleMarkers(map, lng = as.numeric(statistics[i,4]), lat = as.numeric(statistics[i,3]),
+                          label=paste0("region ",statistics$lga[i]," with ",statistics[i,2]," pumps and ",as.numeric(round(statistics[i,6],3)*100),"% functioning"), labelOptions = labelOptions(noHide = F), radius = if(statistics[i,2] < 500) {7}
+else if (statistics[i,2] > 500 & statistics[i,2] < 1000) {14}
+else if (statistics[i,2] > 1000 & statistics[i,2] < 3000) {21}                          
+else {30},
+                          color = if(as.numeric(statistics[i,6]) < 0.2) {"red"}
+                          else if (as.numeric(statistics[i,6]) > 0.2 & as.numeric(statistics[i,6]) < 0.4) {"orange"}
+else if (as.numeric(statistics[i,6]) > 0.4 & as.numeric(statistics[i,6]) < 0.6) {"yellow"}
+                          else {"green"}
+  )};
+
+map;
+
+#We don't find a strong pattern at a national level in it the geofrafic location of the pumps. However, the map helps us better underatanding the data.
+
+```
+
+## Few improvements for feature engineering part
+
+###1. Modifying lga. In lga (local geographic area) some distinct areas are split into rural and urban. We can transform this variable into a new feature that takes three values: rural, urban and other. Probably difference between urban /rural lifestyle affects on the lifecycle of pump.
+```{r}
+dataset = dataset %>% mutate(lga = ifelse( grepl(" Rural", lga), "Rural",
+                                     ifelse( grepl(" Urban", lga), "Urban","other")))
+unique(dataset$lga)
+```
+
+###2. Utilizizng longitude and latitude as numeric predictors
+```{r}
+
+summary (dataset$longitude) #we can see zero values
+summary (dataset$latitude) #we can see zero values
+
+
+##Changing zero latitude and longitude ranges to NA (it is not the geo point of Africa region). 
+# The trick is that values are slightly above zero, so we can not use "0" in the  substituion command.
+
+dataset = dataset %>%
+  mutate(latitude = ifelse(latitude > -1e-06, NA, latitude)) %>%
+  mutate(longitude = ifelse(longitude < 1e-06, NA, longitude))
+
+summary (dataset$longitude)
+summary (dataset$latitude)
+
+
+## Preparing proof for imputing
+## Computing averages using group by disticts_code (more detailed on) in regions
+dataset = dataset  %>% 
+  group_by(region,district_code) %>%
+  mutate(district.long = mean(longitude, na.rm = TRUE)) %>%
+  mutate(district.lat = mean(latitude, na.rm = TRUE)) %>%
+  ungroup()
+
+## Compute averages in regions (just in case the above is also NA)
+dataset  = dataset  %>%
+  group_by(region) %>%
+  mutate(region.long = mean(longitude, na.rm = TRUE)) %>%
+  mutate(region.lat = mean(latitude, na.rm = TRUE)) %>%
+  ungroup()
+
+## Imputing missing longitude/latitude values
+dataset  = dataset %>%
+  mutate(longitude = ifelse(!is.na(longitude), longitude,
+                            ifelse(!is.na(district.long), district.long, region.long))) %>%
+  mutate(latitude = ifelse(!is.na(latitude), latitude,
+                           ifelse(!is.na(district.lat), district.lat, region.lat)))
+
+## Deleting artifficial variables
+
+dataset$district.long<-NULL
+dataset$region.long<-NULL
+dataset$district.lat<- NULL 
+dataset$region.lat<- NULL
+
+
+```
+
+###3. Seasonal rains factor. According to https://www.climatestotravel.com/climate/tanzania/serengeti, there are two main seasons of rains in Tanzania:
+```{r}
+
+# - October - December
+# - March - May
+
+#Probably, some of the pumps are not working during that period of time.
+#What we have to do is to exctract this information using a date recorded
+
+library(lubridate)
+
+dataset = dataset %>%
+  mutate(month_recorded = lubridate::month(date_recorded)) %>%
+  mutate(season = ifelse( month_recorded >= 10 &  month_recorded <= 12, "October-December",
+                          ifelse(month_recorded >= 3 & month_recorded <= 5, "March-May",
+                                  ifelse (month_recorded, "Other period")))) %>%
+select(-month_recorded)
+
+
+```
+
+
+####4. Recovering the population variable (imputing missing values)
+```{r}
+
+
+dataset = dataset %>%
+  mutate(population = ifelse(population == 0, NA, population))
+
+summary (dataset$population)
+
+
+#### Preparing proof for imputing (using the similar strategy as for Spatial parameters, but using a median - as more correct measure since we have a lot of missing values)
+
+
+#### Computing averages using group by disticts_code (more detailed) in regions
+dataset = dataset  %>% 
+  group_by(region,district_code) %>%
+  mutate(district.population = median(population, na.rm = TRUE)) %>%
+  ungroup()
+
+#### Computing median in region (if the above is also NA)
+dataset  = dataset  %>%
+  group_by(region) %>%
+  mutate(region.population = median (population, na.rm = TRUE)) %>%
+  ungroup()
+
+#### Computing median using lga levels (if two  above are also NA)
+dataset  = dataset  %>%
+  group_by(lga) %>%
+  mutate(lga.population = median (population, na.rm = TRUE)) %>%
+  ungroup()
+
+
+#### Imputing missing population values
+dataset  = dataset %>%
+  mutate(population = ifelse(!is.na(population), population,
+                            ifelse(!is.na(district.population), district.population,
+                                   ifelse(!is.na(region.population), region.population, lga.population))))
+
+summary (dataset$population)
+
+#### Deleting artifficial variables
+
+dataset$district.population<-NULL
+dataset$region.population<-NULL
+dataset$lga.population<-NULL
+
+```
+
+## Inserting new features: new_funder and new_installer
+
+Here we work on trying to capture the importance of funders and installers. Given than the original dataset has more than 2000 labels for each of this cathegorical features, the random forrest algorithm can not handle it. The idea is converting the number of levels from more than 2000 to less than 20, using the frequency observed. The hypothesys behing for using the frequency observed, is that the water pumps performed by funders and installers that have performed a similar number of pumps, would have done it with similar level of quality. We tryed also to create the new labels in such a way that the total frequency for the gruped labels is similar, so we have balanced variables.
+
+```{r}
+#length(levels(dataset$funder)) -> Originally more than 2000 different levels for funder
+t_fund<-table(dataset$funder) #Here we obtain the frequencies observed by level
+#length(names(t_fund[t_fund<2])) -> 1129 of them only funded one pump
+less_ten_funders<-names(t_fund[t_fund<11])
+eleven_49_funders<-(names(t_fund[t_fund>10 & t_fund<50])) #268 of them have between 11 and 59 funders
+fifty_99_funders<-names(t_fund[t_fund>49 & t_fund<100]) #66 of them have between 50 and 99 funders
+hundred_200_funders<-names(t_fund[t_fund>99 & t_fund<200]) #44 of them have between 100 and 199 funders
+th_400_funders<-names(t_fund[t_fund>199 & t_fund<400]) #44 of them have between 11 and 59 funders
+fh_700_funders<-names(t_fund[t_fund>399 & t_fund<700]) 
+sh_1000_funders<-names(t_fund[t_fund>699 & t_fund<1000]) 
+th_1200_funders<-names(t_fund[t_fund>999 & t_fund<1200])
+th2_1500_funders<-names(t_fund[t_fund>999 & t_fund<1500])
+th5_2000_funders<-names(t_fund[t_fund>1499 & t_fund<2000])
+
+#Now we create a new variable for funder:
+#first we copy the values of the original one
+#now we include the new labels' names to be able to replace the old labels for the new ones.
+dataset$new_funder<-dataset$funder
+levels(dataset$new_funder)<-c(levels(dataset$new_funder),"less_ten_funders","Eleven_49_Funders","fifty_99_funders","hundred_200_funders","th_400_funders","fh_700_funders","sh_1000_funders","th_1200_funders","th2_1500_funders","th5_2000_funders","No_funder","Error")
+
+#Finally we change the value of new_funder from the original name to the aggegated ones created:
+dataset$new_funder[dataset$funder %in% less_ten_funders]<-"less_ten_funders"
+dataset$new_funder[dataset$funder %in% eleven_49_funders]<-"Eleven_49_Funders"
+dataset$new_funder[dataset$funder %in% fifty_99_funders]<-"fifty_99_funders"
+dataset$new_funder[dataset$funder %in% hundred_200_funders]<-"hundred_200_funders"
+dataset$new_funder[dataset$funder %in% th_400_funders]<-"th_400_funders"
+dataset$new_funder[dataset$funder %in% fh_700_funders]<-"fh_700_funders"
+dataset$new_funder[dataset$funder %in% sh_1000_funders]<-"sh_1000_funders"
+dataset$new_funder[dataset$funder %in% th_1200_funders]<-"th_1200_funders"
+dataset$new_funder[dataset$funder %in% th2_1500_funders]<-"th2_1500_funders"
+dataset$new_funder[dataset$funder %in% th5_2000_funders]<-"th5_2000_funders"
+
+dataset$new_funder[dataset$new_funder==""]<-"No_funder"
+dataset$new_funder[dataset$new_funder==0]<-"Error"
+
+
+dataset$new_funder<-droplevels(dataset$new_funder) #Drop redundant levels
+sort(table(dataset$new_funder), decreasing = TRUE)
+length(levels(dataset$new_funder)) # We reduce them down to 13
+```
+
+We follow the same approach with installers:
+
+```{r}
+t_installer<-table(dataset$installer)
+length(t_installer)
+#sort(table(dataset$installer),decreasing = TRUE)
+less_10_installers<-names(t_installer[t_installer<11])
+eleven_49_installers<-(names(t_installer[t_installer>10 & t_installer<50])) 
+fifty_99_installers<-names(t_installer[t_installer>49 & t_installer<100])
+hundred_200_installers<-names(t_installer[t_installer>99 & t_installer<200]) 
+th_400_installers<-names(t_installer[t_installer>199 & t_installer<400]) 
+fh_700_installers<-names(t_installer[t_installer>399 & t_installer<700]) 
+sh_1000_installers<-names(t_installer[t_installer>699 & t_installer<1000]) 
+th_1500_installers<-names(t_installer[t_installer>999 & t_installer<1500]) 
+
+dataset$new_installer<-dataset$installer
+
+levels(dataset$new_installer)<-c(levels(dataset$new_installer),"less_10_installers","Eleven_49_installers","fifty_99_installers","hundred_200_installers","th_400_installers","fh_700_installers","sh_1000_installers","th_1500_installers","No_installer","Error")
+
+dataset$new_installer[dataset$installer %in% less_10_installers]<-"less_10_installers"
+dataset$new_installer[dataset$installer %in% eleven_49_installers]<-"Eleven_49_installers"
+dataset$new_installer[dataset$installer %in% fifty_99_installers]<-"fifty_99_installers"
+dataset$new_installer[dataset$installer %in% hundred_200_installers]<-"hundred_200_installers"
+dataset$new_installer[dataset$installer %in% th_400_installers]<-"th_400_installers"
+dataset$new_installer[dataset$installer %in% fh_700_installers]<-"fh_700_installers"
+dataset$new_installer[dataset$installer %in% sh_1000_installers]<-"sh_1000_installers"
+dataset$new_installer[dataset$installer %in% th_1500_installers]<-"th_1500_installers"
+dataset$new_installer[dataset$new_installer==""]<-"No_installer"
+dataset$new_installer[dataset$new_installer==0]<-"Error"
+
+
+dataset$new_installer<-droplevels(dataset$new_installer)
+
+sort(table(dataset$new_installer), decreasing = TRUE)
+
+#length(levels(dataset$new_installer)) We reduce them down to 11
+```
+
+
+###removing redundant features.
+```{r}
+# updated list of features to remove
+
+features_to_remove <- c("waterpoint_type_group","source_class","source_type","quantity_group","water_quality","payment_type","management_group","extraction_type_class","extraction_type","subvillage","region","ward","scheme_name","scheme_management","num_private","recorded_by","funder","wpt_name","installer")
+
+dataset  <- dataset[,!names(dataset)%in%features_to_remove]
+dim(dataset) 
+```
+### Null values
+null values in this dataaset are in a strange format they are '' and also some of them are  '0'. so we cannot find them through below code instade we should do 
+```{r}
+
+#sapply(test_set,function(x){sum(is.na(x))})
+#sapply(train_set,function(x){sum(is.na(x))})
+
+train_null_rep <-sapply(dataset[1:59400,],function(x){100*sum((x=='' | x=='0')&(class(x)!='numeric' & class(x)!='integer'))/nrow(train_set)})
+test_null_rep  <-sapply(dataset[59401:nrow(dataset),],function(x){100*sum((x=='' | x=='0')&(class(x)!='numeric' & class(x)!='integer'))/nrow(test_set)})
+
+train_null_col <-train_null_rep[train_null_rep!=0]
+test_null_col  <-test_null_rep[test_null_rep!=0]
+
+```
+###Imputing zero values in gps_height 
+As could be seen in the initial dataaset there are many zero values in gps_height so we decided to check to see if those values are real zeros or are missing information, and not supriosingly they were missing inofrmation;therefore we decided to replace them be real gps_heigth and we found a library,"rgdal" that gives us the gps_heigth based on the latitude and longitude. It should be noticed that we just used it for the cases that the gps_height is zero.
+```{r}
+
+library(elevatr)
+library(rgdal)
+prj_dd <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+spatial_cord <- data.frame(lonitude=dataset$longitude,latitude=dataset$latitude)
+sp_elev_epqs <- get_elev_point(spatial_cord,prj = prj_dd, src ="aws")
+
+dummy <- as.data.table(dataset)
+dummy$gps_heigth_new <- sp_elev_epqs$elevation
+dummy$gps_height     <- as.numeric(dummy$gps_height)
+dummy[gps_height==0]$gps_height <- dummy[gps_height==0]$gps_heigth_new
+
+dataset$gps_height <- dummy$gps_height
+
+```
+###Normalizing null labels
+```{r}
+
+dataset <- as.data.table(dataset)
+
+# modifying null labels:
+#dataset$funder[dataset$funder=='' | dataset$funder=='0'] <- NA
+#dataset$installer[dataset$installer=='' | dataset$installer=='0'] <- NA
+dataset$public_meeting[dataset$public_meeting=='' | dataset$public_meeting=='0'] <- NA
+#dataset$scheme_management[dataset$scheme_management=='' | dataset$scheme_management=='0'] <- NA
+dataset$permit[dataset$permit=='' | dataset$permit=='0'] <- NA
+
+
+```
+
+
+
+###Dealing with null values in "public_meeting" and "permit" and "scheme_management" and "construction_year" column
+Exploring the dataset, we see that these columns both have two levels :TRUE and FALSE, as it is not really possible to guess the NAs for these cols,the best strategy might be to simply replace them by the word 'none'.
+
+
+```{r}
+
+#dataset[is.na(scheme_management)]$scheme_management <- "none"
+dataset[is.na(public_meeting)]$public_meeting <- "none"
+dataset[is.na(permit)]$permit <- "none"
+sapply(dataset,class)
+
+
+
+none_zero_region <- dataset[,list(avg_cy=round(mean(construction_year))),by=region_code][avg_cy!=0]$region_code
+
+for (i in none_zero_region){
+  dataset[construction_year==0 & region_code==i]$construction_year <- round(median(dataset[construction_year!=0 & region_code==i]$construction_year))
+}
+
+for (i in c(1,12,14)){
+  dataset[construction_year==0 & region_code==i]$construction_year <- median(dataset[construction_year!=0,construction_year])
+}
+```
+
+###Final check to make sure 
+```{r}
+sapply(dataset,function(x){sum(is.na(x)|x=='')})
+# at this point we should zoom more into numeric columns as they have '0' that might mean NA in reality.
+```
+
+
+###Identifying numeric columns
+```{r}
+#numeric_cols <-names(dataset)[sapply(dataset,function(x){class(x)=='integer' | class(x)=='numeric'})]
+# "id"                "amount_tsh"        "gps_height"        "population"        
+# in this part we will try to see if we can extract missing values of "construction_year" through exploring in ward to see if we have similar values there.
+#zero_const     <-dataset[construction_year==0,.N,by=ward]
+#non_zero_const <-dataset[construction_year!=0,.N,by=ward]
+#common_ward  <-c()
+#for (i in zero_const$ward){
+#  if(i %in% non_zero_const$ward){
+#    common_ward <-c(common_ward,i)
+#  }
+#}
+#common_ward
+#dataset[construction_year!=0,list(const_yr=floor(mean(construction_year))),by=ward]
+#dataset[ward%in%common_ward & construction_year==0,construction_year]
+
+# through below code we replace the '0's in construction year by the mean of of the construction in that ward.
+#for (i in common_ward){
+#  dataset[ward==i & construction_year==0]$construction_year <- dataset[ward==i & construction_year!=0,floor(mean(construction_year))]
+#}
+
+#dataset[construction_year==0,.N,by=ward]
+```
+###Feature creation
+The year and the month of the records are also important because it might be the case that pumps are affected by seasonal changes, and also years.
+
+```{r}
+dataset$date_recorded <- as.Date(dataset$date_recorded)
+dataset$year_rec  <- format(dataset$date_recorded,"%Y")
+dataset$month_rec <- format(dataset$date_recorded,"%m")
+dataset$day_rec   <- format(dataset$date_recorded,"%d")
+dataset$pomp_age <- as.numeric(dataset$year_rec) -dataset$construction_year
+dataset <- dataset[,-"date_recorded"]
+```
+##Factorizing 
+```{r}
+names(dataset)[sapply(dataset,function(x){class(x)!='factor' & class(x)!='integer' & class(x)!='numeric'})]
+
+dataset$year_rec      <- as.factor(dataset$year_rec)
+dataset$month_rec     <- as.factor(dataset$month_rec)
+dataset$day_rec       <- as.factor(dataset$day_rec)
+dataset$region_code   <- as.factor(dataset$region_code)
+dataset$district_code <- as.factor(dataset$district_code)
+dataset$lga <- as.factor(dataset$lga)
+dataset$season <- as.factor(dataset$season)
+```
+
+```{r}
+factor_features <- names(dataset)[sapply(dataset,function(x){class(x)=="factor"})]
+
+```
+
+
+
+##train,test, split
+```{r}
+#dataset$status_group <- droplevels(dataset$status_group,exclude = "None")
+dataset$permit <- droplevels(dataset$permit,exclude = NA)
+dataset$permit <- droplevels(dataset$permit,exclude = "")
+training <- dataset[1:59400,]
+test     <- dataset[59401:74250,]
+test     <- test[,-"id"]
+test     <- test[,-"status_group"]
+#test$status_group     <- droplevels(test$status_group,exclude = "None")
+```
+
+##Primary modeling
+```{r}
+class_check <- function(x){
+  if (class(x)=="factor" & "None"%in% levels(x) & !'None' %in%x){
+    print(levels(x))
+  }
+}
+sapply(training,class_check)
+```
+
+
+### We should bare in mind that as this dataset is highly imbalanced we need to use the strata param in random forest to avoid the biased.
+```{r}
+summary(training)
+
+training$status_group <- droplevels(training$status_group,exclude = 'None')
+training <- training[,-"id"]
+
+## Intital model
+rf.model=randomForest(status_group~., data=training, mtry=4, ntree=500, importance=TRUE,strata=training$status_group,replace=TRUE)
+
+## To check important variables
+importance(rf.model)       
+varImpPlot(rf.model)        
+
+rf.pre <- predict(rf.model, newdata =test,type="class") 
+plot(rf.model)
+rf.model$classes
+
+```
+
+First of all, lets try to optimize the mtry parameter using the caret build-in tuneRF function. The test will rely on OOB Error to define the most accurate mtry for our model which have the least OOBE Error. We will use ntree=500 and ntree=1000.
+```{r}
+
+
+#ntree=500.
+set.seed(1234)              
+res <- tuneRF(x = training[,-20], y = training$status_group, ntreeTry = 500)
+print(res)
+
+# Find the mtry value that minimizes OOB Error
+mtry_opt500 <- res[,"mtry"][which.min(res[,"OOBError"])]
+print(mtry_opt500)
+
+# Doing the same for ntree=1000.
+set.seed(1)              
+res <- tuneRF(x = training[,-20], y = training$status_group, ntreeTry = 1000)
+print(res)
+
+mtry_opt1000 <- res[,"mtry"][which.min(res[,"OOBError"])]
+print(mtry_opt1000)
+
+
+
+```
+According to the results, mtry = 3 is the best parameter for our model, the second one is mtry=4.
+But since we are interesting in choosing the best combinations of the mtry and ntree we will experiment with tuning manually. We will create scenarios to evaluate different ntree while hodling mtry constant (we will try with mtry=3 and mtry=4).
+We will use the  cross validation approach in caret.
+
+
+```{r}
+
+# This function takes several hours to complete with Icore7, 16 GB of RAM  and SSD.
+# In order to reduce time for computational process we were using 3 folders for CV.
+
+# Choosing the ntree option with mtry=3
+
+#install.packages("doParallel")
+library(doParallel)
+cores <- makeCluster(detectCores()-1)
+registerDoParallel(cores = cores)
+
+# Manual search by create 3 folds
+control <- trainControl (method = "cv", number = 3, search = "grid")
+
+# Create tunegrid
+tunegrid <- expand.grid(.mtry = 3)
+modellist <- list()
+
+# Train with different ntree parameters
+for (ntree in c(300, 500, 800, 1000, 1300, 1500, 2000)){
+  set.seed(123)
+  fit <- train(status_group~.,
+               data=training,
+               method = 'rf',
+               metric = 'Accuracy',
+               tuneGrid = tunegrid,
+               trControl = control,
+               ntree = ntree)
+  key <- toString(ntree)
+  modellist[[key]] <- fit
+}
+
+#Compare results
+results <- resamples(modellist)
+summary(results)
+dotplot(results)
+
+
+stopCluster(cores)
+
+
+
+```
+
+
+
+
+```{r}
+
+# Choosing the ntree option with mtry=4
+cores <- makeCluster(detectCores()-1)
+registerDoParallel(cores = cores)
+
+# Manual search by create 3 folds
+control <- trainControl (method = "cv", number = 3, search = "grid")
+
+# Create tunegrid
+tunegrid2 <- expand.grid(.mtry = 4)
+modellist2 <- list()
+
+# Train with different ntree parameters
+for (ntree in c(300, 500, 800, 1000, 1300, 1500, 2000)){
+  set.seed(123)
+  fit <- train(status_group~.,
+               data=training,
+               method = 'rf',
+               metric = 'Accuracy',
+               tuneGrid = tunegrid2,
+               trControl = control,
+               ntree = ntree)
+  key <- toString(ntree)
+  modellist2[[key]] <- fit
+}
+
+
+stopCluster(cores)
+
+# Our model has the highest accuracy with ntree = 1300 with a mean of 75,72%.
+# We are going to run the final model using these optimal parameters
+
+```
+
+
+### Final model (according to best hyperparameters combination of mtry=4 and ntree=1300)
+
+```{r}
+
+rf.model=randomForest(status_group~., data=training, mtry=4, ntree=1300, importance=TRUE,strata=training$status_group,replace=TRUE)
+
+
+# To check important variables
+importance(rf.model)       
+varImpPlot(rf.model)        
+
+rf.pre <- predict(rf.model, newdata =test,type="class") 
+plot(rf.model)
+rf.model$classes
+
+```
+
+
+###Final submission
+Creating the submission file in the correct format and exporting the results in a csv
+
+```{r}
+
+rf.submission <- data.frame(id = dataset[59401:74250,]$id, status_group= (rf.pre))
+colnames(rf.submission) <-c("id", "status_group")
+write.csv(rf.submission, file = "rf_submission14.csv", row.names = FALSE) 
+```
+
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

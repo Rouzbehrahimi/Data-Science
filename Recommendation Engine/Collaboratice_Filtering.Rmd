@@ -1,0 +1,67 @@
+# IE - Master in Business Analytics and Big Data
+Recommendation Systems
+
+Building a Collaborative Filtering Engine
+
+
+
+========================================================
+
+# Initialization
+
+Import libraries
+
+```{r}
+library(corrgram)
+library(ggplot2)
+```
+
+Load the critics dataset.
+
+```{r}
+critics = read.csv("../../Data/critics.csv")
+```
+
+# 1) Pearson correlation coefficient 
+Calculate the Pearson correlation coefficient between Sophia and Nuria
+
+**Expected correlation between Sophia and Nuria**: 0.3651484
+
+```{r fig.width=7, fig.height=6}
+# Transforming data to calculate pearson correlation easily for all exercises
+rownames(critics) <- critics$User
+critics.df <- data.frame(critics[,-1 ])
+critics.t <- t(critics.df)
+# Correlation matrix by critic, to calculate easily every user pair combination
+pearsoncorr <- cor(critics.t,use="pairwise.complete.obs",method="pearson")
+
+# Plot all correlations, cool visualization by ALVARO FERNANDEZ QUI??OONES
+# PLOTTING THE COR-MATRIX WITH THE NUMBER METHOD...QUITE VISUAL BUT USEFUL AS WELL WITH THE NUMBERS TO CHECK
+corrgram(pearsoncorr, order=NULL, lower.panel=panel.shade, upper.panel=NULL, text.panel=panel.txt, main="CRITICS")
+
+# Print the correlation
+pearsoncorr["Sophia","Nuria"] 
+```
+
+# 2) Compare two movie critics
+Using the calculated Pearson correlation in the previous section. Compare and show the movie ratings for Sophia and Nuria on a scatter plot. How is this compared with the same ratings of Maria and Nerea on a scatter plot? What about Chris and Jim? What it means?
+
+```{r fig.width=7, fig.height=6}
+# Transforming data frame to be used by ggplot
+critics.t<-data.frame(t(critics)[2:21,1:20], row.names = NULL)
+colnames(critics.t)<-critics$User
+critics.t$Movie<-rownames(t(critics))[2:21]
+for (i in 1:20){
+  critics.t[,i] = critics.t[,i] <- as.numeric(as.character(critics.t[,i]))
+}
+# Plot for Nuria and Sophia correlation
+ggplot(critics.t, aes(Nuria,Sophia))+geom_point(shape = 1) + geom_smooth(method=lm)
+# Plot for Maria and Nerea correlation
+ggplot(critics.t, aes(Maria,Nerea))+geom_point(shape = 1) + geom_smooth(method=lm)
+# Plot for Chris and Jim correlation
+ggplot(critics.t, aes(Chris,Jim))+geom_point(shape = 1) + geom_smooth(method=lm)
+
+# "Both Nuria and Sophia and Chris and Jim have a positive correlation, which means that it is probably that if one of them like a particular movie, the other person will like it too. Moreover, it can be said that this positive correlation is stronger between Chris and Jim, that's to say, they have more similar preferences. 
+
+# On the other hand. Maria and Nerea often give different rating to the same movie, that's why the graph is representing a negative correlation. These two users are dissimilar in terms of movie taste, one user usually hates what the other likes."
+```

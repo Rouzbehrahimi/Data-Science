@@ -1,0 +1,189 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+
+Recommendation Systems
+
+Building a Non Personalized Recommendation Engine
+
+Author: Rouzbeh Rahimi
+
+========================================================
+
+# Initialization
+
+Import libraries
+
+```{r}
+```
+
+Load the critics dataset.
+
+```{r}
+library(data.table)
+```
+
+# 1) Top 5 Movies, by rating mean
+Calculate mean rating for each movie, ordered with the highest rating listed first, and plot the top 5.
+
+**Expected result**:
+3.600000, 'The Shawshank Redemption'
+3.266667, 'Star Wars IV - A New Hope'
+3.222222, 'Blade Runner'
+3.166667, 'Groundhog Day'
+3.062500, 'The Silence of the Lambs'
+
+```{r fig.width=7, fig.height=6}
+data <- read.csv("/Users/rouzbehrahimi/desktop/IE-BD/Recommendation_Eng/IE-Lab1/Data/critics.csv",header=TRUE,sep=",")
+dim(data)
+#mena rating calculation
+data <- as.data.table(data)
+top_rated <- (sort(sapply(data[,-1],function(x){mean(x,na.rm=TRUE)}),decreasing = TRUE)[1:5])
+top_rated <- data.table(movie=names(top_rated),avg_rateing=top_rated)
+top_rated
+```
+
+# 2) Top 5 Movies, by rating distribution
+Calculate the percentage of ratings for each movie that are 4 stars or higher. Order with the highest percentage first, and plot the top 5 movies with more high ratings distribution.
+
+**Expected result**:
+0.7000000, 'The Shawshank Redemption'
+0.5333333, 'Star Wars IV - A New Hope'
+0.5000000, 'Gladiator'
+0.4444444, 'Blade Runner'
+0.4375000, 'The Silence of the Lambs'
+
+```{r fig.width=7, fig.height=6}
+top_percentage_movies <- sort(sapply(data[,-1],function(x){sum(x>=4,na.rm=TRUE)/sum(x>=0,na.rm=TRUE)}),decreasing=TRUE)[1:5]
+top_percentage_movies<- data.table(movie=names(top_percentage_movies),percentage_over_4=top_percentage_movies)
+top_percentage_movies
+```
+
+# 3) Top 5 Movies, by quantity of ratings
+Count the number of ratings for each movie, order the one with most number of ratings first, submit the top 5.
+
+**Expected result**:
+17, 'Toy Story'
+16, 'The Silence of the Lambs'
+15, 'Star Wars IV - A New Hope'
+14, 'Star Wars VI - Return of the Jedi'
+13, 'Independence Day'
+
+```{r fig.width=7, fig.height=6}
+
+top_rating_num <-sort(sapply(data[,-1],function(x){sum(!is.na(x))}),decreasing = TRUE)[1:5]
+top_rating_num<- data.table(movie=names(top_rating_num),number_of_rating=top_rating_num)
+top_rating_num
+```
+
+# 4) People who watched Star Wars IV also watched ...
+Calculate movies that most often occur with other movie. For each movie, calculate the percentage of the other movie raters who also rated that movie. Order with the highest percentage first, and submit the top 5. Select "Star.Wars.IV...A.New.Hope" movie by defaut. Use the (x+y)/x method.
+
+Top Occurences:
+0.9333333, 'Toy Story'
+0.8666667, 'Star Wars: Episode VI - Return of the Jedi'
+0.8000000, 'The Silence of the Lambs'
+0.7333333, 'Independence Day'
+0.6666667, 'Total Recall'
+
+```{r fig.width=7, fig.height=6}
+
+most_concurrent_star <- sort(sapply(data[,-1],function(y){sum(!is.na(data$Star.Wars.IV...A.New.Hope) &  !is.na(y))/sum(!is.na(data$Star.Wars.IV...A.New.Hope))}),decreasing = TRUE)[2:6]
+most_concurrent_star <- data.table(concurrent_movie=names(most_concurrent_star),concurrency_percentage=most_concurrent_star)
+most_concurrent_star
+```
+
+
+
+# 5) People who liked Babe also liked ...
+Calculate the movies better rated of people who liked a movie. Select the people who liked the movie "Babe" (4 or 5 stars) and provide the top 5 movies they liked most.
+
+**Expected result**:
+5.000, 'Pulp.Fiction'
+5.000, 'Groundhog.Day'
+4.500, 'The.Shawshank.Redemption'
+4.333, 'Toy.Story'
+4.000, 'Blade.Runner'
+
+```{r fig.width=7, fig.height=6}
+
+also_liked_Babe <-sort(sapply(data[data$Babe>=4,-1],function(x){mean(x,na.rm=TRUE)}),decreasing = TRUE)
+also_liked_Babe<- data.table(movie=names(also_liked_Babe),rating=also_liked_Babe)
+also_liked_Babe<- also_liked_Babe[rating>=4,]
+also_liked_Babe
+```
+
+# 6) MovieLens
+Explore a real data set and provide non-personalized ratings. You can use the MovieLens database. You can find MovieLens' dataset here: http://files.grouplens.org/datasets/movielens/ml-10m-README.html
+
+```{r fig.width=7, fig.height=6}
+# In order to make the final dataset I had to join the two dataset I downloaded from MoviLens
+movie <- fread("/Users/rouzbehrahimi/desktop/IE-BD/Recommendation_Eng/IE-Lab1/Data/movies.csv",header=TRUE,sep=",")
+rating<- read.csv("/Users/rouzbehrahimi/desktop/IE-BD/Recommendation_Eng/IE-Lab1/Data/ratings.csv",header=TRUE,sep=",")
+rating<- as.data.table(rating)
+movie <- as.data.table(movie)
+dt_movie <-merge(x = movie, y = rating, by = "movieId", all.x = TRUE)
+# Calculating the mean of rating for all movies and selecting the top 10
+avg_rate <-dt_movie[,list(avg_rate=mean(rating,na.rm=TRUE)),by="title"]
+avg_rate <-avg_rate[order(avg_rate,decreasing = TRUE),][1:10]
+avg_rate
+
+```
+
+```{r fig.width=7, fig.height=6}
+#percentage over 4 
+#r at the end of the percentage_over_4_r is to show that this is for a real dataset
+percentage_over_4_r <- dt_movie[!is.na(rating),list(percentage=sum(rating>=4)/.N),by="title"]
+percentage_over_4_r<- percentage_over_4_r[order(percentage,decreasing = TRUE),][1:10,]
+percentage_over_4_r
+```
+
+
+
+
+```{r fig.width=7, fig.height=6}
+#most number of ratings 
+
+most_num_rating <-dt_movie[!is.na(rating),list(num_rating=.N),by="title"]
+most_num_rating<-most_num_rating[order(num_rating,decreasing = TRUE),][1:10,]
+most_num_rating
+```
+```{r fig.width=7, fig.height=6}
+# people who watched Jumanji
+#Jumanji (1995)
+
+who_watched_Jumanji <-dt_movie[title=="Jumanji (1995)" & !is.na(rating),userId]
+
+
+
+concurrent_movies <-dt_movie[dt_movie$userId==who_watched_Jumanji,list(concurrence=.N),by="title"]
+concurrent_movies <-concurrent_movies[order(concurrence,decreasing = TRUE),][1:10,]
+concurrent_movies 
+
+# this way we list the movies which have the highest number of concurrent with Jumanji as a target.
+# therefor if someone watched Jumanji we can offer them the most concurrent ones from our list.
+
+
+```
+
+```{r fig.width=7, fig.height=6}
+# In this part we want to select the movies with highest rating that were seen by Jumanji's watchers 
+#Jumanji (1995)
+
+who_watched_Jumanji <-dt_movie[title=="Jumanji (1995)" & !is.na(rating),userId]
+
+
+high_rate_concurrent_movies <-dt_movie[dt_movie$userId==who_watched_Jumanji,list(avg_rate=mean(rating),n=.N),by="title"]
+high_rate_concurrent_movies <-high_rate_concurrent_movies[order(n,avg_rate,decreasing = TRUE),][1:10]
+high_rate_concurrent_movies
+
+# I decided to first sort them based on the number of rating, because it does not make sense to recommend a movie with just 
+#one rating
+
+
+```
+
+
+

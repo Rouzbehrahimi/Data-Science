@@ -1,10 +1,10 @@
 ---
-title: "1st Assignment"
+title: "House Pricing"
 output: 
   html_document:
     toc: true
     toc_depth: 3
-author: Machine Learning II
+author: 
 ---
 
 ```{r setup, include=FALSE}
@@ -23,7 +23,7 @@ library(caret)     # To enable Lasso training with CV.
 
 # Introduction
 
-This assignment focuses on applying the Feature Engineering processes and the Evaluation methods that we have learned in previous sessions to solve a practical scenario: Predict the price of houses.
+This Rmarkdown focuses on applying the Feature Engineering processes and the Evaluation methods.
 In particular, we are going to use the experimental scenario proposed by the House Prices Dataset. This dataset includes 79 explanatory variables of residential homes. For more details on the dataset and the competition see <https://www.kaggle.com/c/house-prices-advanced-regression-techniques>.
 
 This dataset is close to the kind of data that you will find in the real world: it is not clean, it might include repeated, correlated or uninformative features, it has null or wrong values... 

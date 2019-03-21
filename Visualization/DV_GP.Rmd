@@ -1,0 +1,77 @@
+---
+title: "DV_GP"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+library(ggplot2)
+library(data.table)
+data <- fread("/Users/rouzbehrahimi/desktop/IE-BD/Data-visualization/madrid_transactions.csv")
+dim(data)
+```
+
+## Data exploration
+```{r cars}
+head(data)
+```
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+par(mfrow=c(1,2))
+
+ggplot(data,aes(hour,amount,fill=category))+geom_bar(stat='identity')+theme_bw()
+```
+```{r pressure, echo=FALSE}
+
+ggplot(data,aes(hour,amount,fill=weekday))+geom_bar(stat='identity')+theme_classic()
+```
+
+```{r pressure, echo=FALSE}
+ggplot(data,aes(category,amount))+geom_col(col='blue')+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+```{r pressure, echo=FALSE}
+ggplot(data,aes(daytime,amount,fill=weekday))+geom_col()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+```{r pressure, echo=FALSE}
+ggplot(data,aes(weekday,amount))+geom_col(width = 0.4)+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+```{r pressure, echo=FALSE}
+dt_country <-data[,list(total_amount=sum(amount)),by=customer_country,]
+dt_country <-dt_country[order(total_amount,decreasing = TRUE),]
+dt_country_top <- dt_country[1:10,]
+ggplot(dt_country_top,aes(customer_country,total_amount))+geom_bar(fill='blue',col='blue',stat='identity')+coord_flip()
+
+```
+
+
+
+
+```{r pressure, echo=FALSE}
+avg_amount    <-mean(data$amount)
+median_amount <-median(data$amount)
+ggplot(data,aes(amount))+geom_density()+xlim(0,500)+geom_vline(xintercept = avg_amount,col='blue')+geom_vline(xintercept = median_amount,col='red')+geom_text(aes(x = median_amount, y = -0.001, label = "Median", col = "red")) + 
+geom_text(aes(x = avg_amount, y =-0.001, label = "Mean", col = "blue"))+theme_bw()
+```
+
+```{r pressure, echo=FALSE}
+ggplot(data,aes(category,amount))+geom_bar(stat = 'identity')+facet_wrap(~weekday)+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+```{r pressure, echo=FALSE}
+date <- strptime(data$tx_date_proc,"%Y-%m-%d %H:%M:%S+00")
+date <- as.Date(date)
+unique(date)
+# the data is only for two days so we cannot draw a time serie for that.
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

@@ -1,0 +1,253 @@
+---
+title: "Black_Friday"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Importing libraries
+```{r}
+source('/Users/rouzbehrahimi/desktop/IE-BD/Advanced_R/regression_metrics.R')
+library(data.table)
+library(randomForest)
+library(ggplot2)
+library(caret)
+```
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+## Loading the datasets
+```{r cars}
+train <- fread('/Users/rouzbehrahimi/desktop/IE-BD/Advanced_R/Black_Friday/BlackFriday_train.csv')
+test  <- fread('/Users/rouzbehrahimi/desktop/IE-BD/Advanced_R/Black_Friday/BlackFriday_test.csv')
+```
+## Adding a new variable
+hereby we can separate train and test data later 
+```{r}
+train$data_type <- 'train'
+test$data_type  <- 'test'
+str(train)
+```
+### Adding a purchase value to the test set to make the same size as the test and merge them for feature engineering 
+```{r}
+test$Purchase=0
+str(test)
+```
+## Mergint test and train for feature engineering
+```{r}
+df <- rbind(train,test)
+df[,names(df)[sapply(df,is.character)]:=lapply(.SD,as.factor),.SDcols = names(df)[sapply(df, is.character)]]
+df[,User_ID:=as.character(User_ID),]
+df[,Product_ID:=as.character(Product_ID),]
+df[,names(df)[sapply(df,is.integer)]:=lapply(.SD,as.factor),.SDcols=names(df)[sapply(df,is.integer)]]
+str(df)
+```
+
+```{r}
+sapply(df[,c('Product_Category_1','Product_Category_2','Product_Category_3'),with=FALSE],function(x){sort(unique(x))})
+```
+## Data visualization
+```{r}
+ggplot(df, aes(Product_Category_3, fill=Product_Category_3)) + geom_bar()
+```
+
+
+
+
+```{r}
+ggplot(df, aes(Product_Category_1, fill=Product_Category_1)) + geom_bar()
+```
+
+
+```{r}
+ggplot(df, aes(Product_Category_2, fill=Product_Category_2)) + geom_bar()
+```
+```{r}
+ggplot(df, aes(Gender, fill=Gender)) + geom_bar()
+```
+```{r}
+ggplot(df, aes(Occupation, fill=Occupation)) + geom_bar()
+```
+```{r}
+ggplot(df, aes(City_Category, fill=City_Category)) + geom_bar()
+```
+```{r}
+ggplot(df, aes(Stay_In_Current_City_Years, fill=Stay_In_Current_City_Years)) + geom_bar()
+```
+```{r}
+ggplot(df, aes(Marital_Status, fill=Marital_Status)) + geom_bar()
+```
+
+## In this part I would try to inpute null values according to their product_ID
+```{r}
+Mode <- function(x) {
+  ux <- na.omit(unique(x) )
+ tab <- tabulate(match(x, ux)); ux[tab == max(tab) ]
+}
+
+
+
+#df <-merge(df,df[,list(PC_2=Mode(Product_Category_2)),by='Product_ID'],by='Product_ID')
+#df <-merge(df,df[,list(PC_3=Mode(Product_Category_3)),by='Product_ID'],by='Product_ID')
+```
+
+## NA detection
+### As it is seen below 31% of product_2 values and 69% product_3 values are missing.
+```{r}
+library(naniar)
+vis_miss(df, warn_large_data= FALSE,show_perc_col = TRUE)
+```
+
+```{r}
+df[is.na(Product_Category_2),Product_Category_2:='0']
+df[is.na(Product_Category_3),Product_Category_3:='0']
+
+sapply(df,function(x){sum(is.na(x))})
+```
+### Feature creation
+Here I cerate three new feature frequncy of product purchase and user frequency and average purchase per product.
+```{r}
+User_freq    <- train[,list(count=.N),by='User_ID']
+Product_freq <- train[,list(count=.N),by='Product_ID']
+unseen_products <-data.table(setdiff(test$Product_ID,Product_freq$Product_ID))
+unseen_products$count <- 0
+colnames(unseen_products)[1] <-'Product_ID'
+Product_freq <- rbind(Product_freq,unseen_products)
+User_freq$User_ID <- as.character(User_freq$User_ID)
+mean_purchase <- train[,list(avg_pro_purchase=mean(Purchase)),by='Product_ID']
+df <- merge(df,User_freq,by="User_ID")
+df <- merge(df,Product_freq,by="Product_ID")
+df <- merge(df,mean_purchase,by='Product_ID')
+str(df)
+```
+```{r}
+head(df)
+```
+
+
+## Train, test Split
+As we had merge some new variable the order of the datset is not like the original one anymore therefore we need to seprate the test and train set,
+using the data_type variable.
+```{r}
+dim(train)
+dim(test)
+train_set <- df[data_type=='train',]
+test_set  <- df[data_type=='test']
+#train <- df[1:483819,]
+#test  <- df[483820:537577,]
+```
+
+### Sampling and making the model based on our sample
+
+As the dataset is relatively big I want to take a sample of that and work with the sample and make the model for my sample and the see if the result would be representative.I would take a sample with the size of 5% of the whole train set
+```{r}
+sample_train_index <- sample(nrow(train_set),0.05*nrow(train),replace = FALSE)
+sample_train       <- train_set[sample_train_index,]
+
+pvalues = list()
+for (col in names(train_set)[-13]) {
+  if (class(train_set[[col]]) %in% c("numeric","integer")) {
+    # Numeric variable. Using Kolmogorov-Smirnov test
+    
+    pvalues[[col]] = ks.test(sample_train[[col]],train_set[[col]])$p.value
+    
+  } else {
+    # Categorical variable. Using Pearson's Chi-square test
+    
+    probs = table(train_set[[col]])/nrow(train_set)
+    if (length(probs)==length(table(sample_train[[col]]))){
+       pvalues[[col]] = chisq.test(table(sample_train[[col]]),p=probs,rescale.p = TRUE)$p.value
+      
+    }else{
+      print(col)
+    }
+   
+    
+  }
+}
+pvalues
+```
+Now that the sample above is a representative sample we can move to modeling 
+## Modelling
+
+### ranger
+```{r}
+library(ranger)
+validation <- train_set[-sample_train_index,]
+rf_1<-ranger(Purchase~., sample_train[,-c('Product_ID','User_ID'),with=FALSE])
+test_rf1<-predict(rf_1,validation[,-c('Product_ID','User_ID'),with=FALSE])$predictions
+mape(real=validation$Purchase, predicted = test_rf1)
+```
+
+### Random forest
+As we can see from the variable importance, the new variables that we created are playing an important role in the modeling.
+```{r pressure, echo=FALSE}
+
+rf.model=randomForest(Purchase~., data=sample_train[,-c('Product_ID','User_ID'),with=FALSE], mtry=5, ntree=400, importance=TRUE)
+
+## To check important variables
+       
+varImpPlot(rf.model)        
+
+
+rf.pre <- predict(rf.model, newdata =validation ,type="response") 
+
+```
+The Mape is quite good.
+```{r}
+mape(real=validation$Purchase, predicted = rf.pre )
+```
+```{r}
+plot(rf.model)
+```
+### Trying with XGBoost
+```{r}
+xgbGrid <- expand.grid(nrounds = c(1, 10),
+                       max_depth = c(2,4,6, 8),
+                       eta = c(.1, .4),
+                       gamma = 0,
+                       colsample_bytree = c(0.5,.7,0.8),
+                       min_child_weight = 1,
+                       subsample = c(.8, 1))
+
+ctrl <- trainControl(
+  method = "cv",
+  number = 3,
+  savePredictions=TRUE
+)
+
+xgbreg <- train(
+  Purchase~.,
+  data = sample_train[,-c('Product_ID','User_ID'),with=FALSE],
+  method = "xgbTree", num.trees=1000,
+  preProc = NULL, 
+  tuneGrid = xgbGrid,
+  trControl = ctrl,
+  metric = "MAE"
+)
+
+xgbreg$bestTune
+plot(xgbreg)
+
+xgb_pre <- predict(xgbreg,newdata =validation )
+
+```
+MAPE from xgboost is not better tha n Randomforest prediction therefore we would use random forest result.
+```{r}
+mape(real=validation$Purchase, predicted = xgb_pre )
+```
+
+## Writing the result into a csv file 
+```{r}
+
+final_prediction <-predict(rf.model, newdata =test_set ,type="response")
+test_set$Purchase<-final_prediction
+
+test_set <- test_set[,-c('count.x','count.y','avg_pro_purchase','data_type')]
+
+write.csv(test_set, file = "BF_submission.csv", row.names = FALSE) 
+```
